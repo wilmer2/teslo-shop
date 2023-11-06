@@ -9,7 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
-import { Product } from './entities/product.entity';
+import { Product, ProductImage } from './entities';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
 import { validate as isUUID } from 'uuid';
 
@@ -20,13 +20,22 @@ export class ProductsService {
   constructor(
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
+    @InjectRepository(ProductImage)
+    private readonly productImageRepository: Repository<ProductImage>,
   ) {}
 
-  async create(createProductDto: CreateProductDto): Promise<Product> {
+  async create(createProductDto: CreateProductDto) {
     let product: Product;
+    const { images = [], ...productDetails } = createProductDto;
+    const productImages = images.map((img: string) =>
+      this.productImageRepository.create({ url: img }),
+    );
 
     try {
-      product = this.productRepository.create(createProductDto);
+      product = this.productRepository.create({
+        ...productDetails,
+        images: productImages,
+      });
     } catch (error) {
       this.logger.error('error create product in memory', error);
       throw new InternalServerErrorException('Has error ocurred in created');
@@ -38,10 +47,10 @@ export class ProductsService {
       this.handleDBExceptions(error);
     }
 
-    return product;
+    return { ...product, images };
   }
 
-  async findAll(paginationDto: PaginationDto): Promise<Product[]> {
+  async findAll(paginationDto: PaginationDto) {
     let products: Product[];
     const { limit = 10, offset = 0 } = paginationDto;
 
@@ -49,15 +58,21 @@ export class ProductsService {
       products = await this.productRepository.find({
         take: limit,
         skip: offset,
+        relations: {
+          images: true,
+        },
       });
     } catch (error) {
       this.handleDBExceptions(error);
     }
 
-    return products;
+    return products.map((product) => ({
+      ...product,
+      images: product.images.map((image) => image.url),
+    }));
   }
 
-  async findOne(term: string): Promise<Product> {
+  async findOne(term: string) {
     let product: Product;
 
     if (isUUID(term)) {
@@ -69,7 +84,7 @@ export class ProductsService {
         this.handleDBExceptions(error);
       }
     } else {
-      const queryBuilder = this.productRepository.createQueryBuilder();
+      const queryBuilder = this.productRepository.createQueryBuilder('prod');
 
       try {
         product = await queryBuilder
@@ -77,6 +92,7 @@ export class ProductsService {
             title: term.toUpperCase(),
             slug: term.toLowerCase(),
           })
+          .leftJoinAndSelect('prod.images', 'productImages')
           .getOne();
       } catch (error) {
         this.handleDBExceptions(error);
@@ -92,6 +108,15 @@ export class ProductsService {
     return product;
   }
 
+  async findOnePlan(term: string) {
+    const { images = [], ...product } = await this.findOne(term);
+
+    return {
+      ...product,
+      images: images.map((image) => image.url),
+    };
+  }
+
   async update(
     id: string,
     updateProductDto: UpdateProductDto,
@@ -102,6 +127,7 @@ export class ProductsService {
       product = await this.productRepository.preload({
         id,
         ...updateProductDto,
+        images: [],
       });
     } catch (error) {
       this.handleDBExceptions(error);

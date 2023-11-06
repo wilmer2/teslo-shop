@@ -186,12 +186,10 @@ export class ProductsService {
   }
 
   private handleDBExceptions(error: any) {
+    console.log(error);
+
     if (error.code === '23505') {
       throw new BadRequestException(error.detail);
-    }
-
-    if (error.message && typeof error.message === 'string') {
-      throw new BadRequestException(error.message);
     }
 
     this.logger.error('error to create product in db', error);
